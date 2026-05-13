@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"errors"
@@ -12,19 +12,19 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-type JWTManager struct {
+type Manager struct {
 	secret []byte
 	ttl    time.Duration
 }
 
-func NewJWTManager(secret string, ttl time.Duration) *JWTManager {
-	return &JWTManager{
+func NewManager(secret string, ttl time.Duration) *Manager {
+	return &Manager{
 		secret: []byte(secret),
 		ttl:    ttl,
 	}
 }
 
-func (m *JWTManager) Generate(userID string) (string, error) {
+func (m *Manager) Generate(userID string) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -38,7 +38,7 @@ func (m *JWTManager) Generate(userID string) (string, error) {
 
 }
 
-func (m *JWTManager) Verify(tokenStr string) (string, error) {
+func (m *Manager) Verify(tokenStr string) (string, error) {
 
 	claims := &Claims{}
 

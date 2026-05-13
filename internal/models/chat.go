@@ -1,4 +1,4 @@
-package main
+package models
 
 import "time"
 
@@ -7,12 +7,6 @@ type Chat struct {
 	MemberIDs []string
 	CreatedAt time.Time
 }
-
-// type PublicChat struct {
-// 	ID        string    `json:"id"`
-// 	MemberIDs []string  `json:"member_ids"`
-// 	CreatedAt time.Time `json:"created_at"`
-// }
 
 type Message struct {
 	ID        string
@@ -38,15 +32,6 @@ func (c *Chat) HasMember(userID string) bool {
 	}
 	return false
 }
-
-// func (c *Chat) ToPublic() PublicChat {
-
-// 	return PublicChat{
-// 		ID:        c.ID,
-// 		MemberIDs: c.MemberIDs,
-// 		CreatedAt: c.CreatedAt,
-// 	}
-// }
 
 func (m *Message) ToPublic() PublicMessage {
 	return PublicMessage{

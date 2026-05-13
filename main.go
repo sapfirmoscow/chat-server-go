@@ -22,6 +22,9 @@ func main() {
 	http.Handle("POST /chats",
 		authMW(http.HandlerFunc(handleCreateChat(chatStorage, userStorage))))
 
+	http.Handle("GET /chats",
+		authMW(http.HandlerFunc(handleGetMyChats(chatStorage, userStorage))))
+
 	fmt.Println("Server started on http://localhost:8080")
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {

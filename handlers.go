@@ -42,6 +42,10 @@ type ChatResponse struct {
 	CreatedAt time.Time    `json:"created_at"`
 }
 
+type ChatsResponse struct {
+	Chats []ChatResponse `json:"chats"`
+}
+
 func handleMe(userStorage *UserStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -260,6 +264,36 @@ func handleCreateChat(chatStorage *ChatStorage, userStorage *UserStorage) http.H
 			log.Printf("encode error: %v", err)
 		}
 
+	}
+}
+
+func handleGetMyChats(chatStorage *ChatStorage, userStorage *UserStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		currentUserID, ok := GetUserID(r.Context())
+
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "Cant found userID in context")
+			return
+		}
+
+		chats := chatStorage.GetUserChats(currentUserID)
+
+		responses := make([]ChatResponse, 0, len(chats))
+
+		for _, chat := range chats {
+			responses = append(responses, buildChatResponse(chat, userStorage))
+		}
+
+		chatResponse := ChatsResponse{
+			Chats: responses,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		if err := json.NewEncoder(w).Encode(chatResponse); err != nil {
+			log.Printf("encode error: %v", err)
+		}
 	}
 }
 

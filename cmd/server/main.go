@@ -14,6 +14,7 @@ import (
 func main() {
 	userStorage := storage.NewUsers()
 	chatStorage := storage.NewChats()
+	messages := storage.NewMessages()
 
 	jwtManager := auth.NewManager("i will change it for prom", time.Hour*24)
 
@@ -28,6 +29,12 @@ func main() {
 
 	http.Handle("GET /chats",
 		authMW(http.HandlerFunc(handlers.HandleGetMyChats(chatStorage, userStorage))))
+
+	http.Handle("POST /chats/{id}/messages",
+		authMW(http.HandlerFunc(handlers.HandleSendMessage(chatStorage, messages))))
+
+	http.Handle("GET /chats/{id}/messages",
+		authMW(http.HandlerFunc(handlers.HandleGetMessages(chatStorage, messages))))
 
 	fmt.Println("Server started on http://localhost:8080")
 	err := http.ListenAndServe(":8080", nil)

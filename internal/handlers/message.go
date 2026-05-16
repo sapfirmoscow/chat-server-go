@@ -12,6 +12,7 @@ import (
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/models"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage"
+	wsPkg "github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
 type SendMessageRequest struct {
@@ -22,7 +23,7 @@ type MessagesResponse struct {
 	Messages []models.PublicMessage `json:"messages"`
 }
 
-func HandleSendMessage(chats *storage.Chats, messages *storage.Messages) http.HandlerFunc {
+func HandleSendMessage(chats *storage.Chats, messages *storage.Messages, hub *wsPkg.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		chat, senderID, ok := resolveChatAccess(w, r, chats)
 		if !ok {
@@ -59,6 +60,16 @@ func HandleSendMessage(chats *storage.Chats, messages *storage.Messages) http.Ha
 		}
 
 		messages.Add(&message)
+
+		// рассылка через WebSocket участникам чата
+		payload, err := wsPkg.Marshal(wsPkg.EventMessageNew, message.ToPublic())
+		if err != nil {
+			log.Printf("ws marshal error: %v", err)
+		} else {
+			for _, uid := range chat.MemberIDs {
+				hub.SendToUser(uid, payload)
+			}
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

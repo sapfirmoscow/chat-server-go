@@ -6,13 +6,13 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
+	wsPkg "github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
-func HandleWS(jwtManager *auth.Manager) http.HandlerFunc {
+func HandleWS(jwtManager *auth.Manager, hub *wsPkg.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		userID, err := extractUserIDFromSubprotocol(r, jwtManager)
@@ -32,14 +32,26 @@ func HandleWS(jwtManager *auth.Manager) http.HandlerFunc {
 
 		defer conn.CloseNow()
 
-		log.Printf("ws connected: user=%s", userID)
+		client := wsPkg.NewClient(userID, conn)
+		hub.Register(client)
 
-		if err := echoLoop(r.Context(), conn, userID); err != nil {
-			log.Printf("ws loop ended for user=%s: %v", userID, err)
-			return
-		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
 
-		conn.Close(websocket.StatusNormalClosure, "")
+		// Запускаем write и ping в отдельных горутинах.
+		go client.WritePump(ctx)
+		go client.PingPump(ctx)
+
+		// ReadPump блокирует текущую горутину.
+		// Когда он вернётся (клиент отключился или ping не прошёл),
+		// cancel() через defer завершит остальные горутины.
+		client.ReadPump(ctx)
+
+		cancel() // явный cancel — на случай, если ReadPump вышел сам, а другим горутинам тоже пора
+		hub.Unregister(client)
+
+		log.Printf("ws disconnected: user=%s", userID)
+
 	}
 }
 
@@ -70,23 +82,4 @@ func extractUserIDFromSubprotocol(r *http.Request, jwtManager *auth.Manager) (st
 	}
 
 	return userID, nil
-}
-
-func echoLoop(ctx context.Context, conn *websocket.Conn, userID string) error {
-	for {
-
-		msgType, data, err := conn.Read(ctx)
-		if err != nil {
-			return err
-		}
-
-		log.Printf("ws recv from %s: %s", userID, string(data))
-
-		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err = conn.Write(writeCtx, msgType, data)
-		cancel()
-		if err != nil {
-			return err
-		}
-	}
 }

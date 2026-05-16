@@ -9,6 +9,7 @@ import (
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/handlers"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage"
+	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
 func main() {
@@ -19,6 +20,8 @@ func main() {
 	jwtManager := auth.NewManager("i will change it for prom", time.Hour*24)
 
 	authMW := auth.Middleware(jwtManager)
+
+	hub := ws.NewHub()
 
 	http.HandleFunc("POST /register", handlers.HandleRegister(userStorage, jwtManager))
 	http.HandleFunc("POST /login", handlers.HandleLogin(userStorage, jwtManager))
@@ -31,12 +34,12 @@ func main() {
 		authMW(http.HandlerFunc(handlers.HandleGetMyChats(chatStorage, userStorage))))
 
 	http.Handle("POST /chats/{id}/messages",
-		authMW(http.HandlerFunc(handlers.HandleSendMessage(chatStorage, messages))))
+		authMW(http.HandlerFunc(handlers.HandleSendMessage(chatStorage, messages, hub))))
 
 	http.Handle("GET /chats/{id}/messages",
 		authMW(http.HandlerFunc(handlers.HandleGetMessages(chatStorage, messages))))
 
-	http.Handle("GET /ws", handlers.HandleWS(jwtManager))
+	http.Handle("GET /ws", handlers.HandleWS(jwtManager, hub))
 
 	fmt.Println("Server started on http://localhost:8080")
 	err := http.ListenAndServe(":8080", nil)

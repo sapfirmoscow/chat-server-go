@@ -8,6 +8,7 @@ import (
 
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/handlers"
+	"github.com/sapfirmoscow/chat-server-go/internal/ratelimit"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
@@ -23,9 +24,16 @@ func main() {
 
 	hub := ws.NewHub()
 
+	// Поиск пользователей ограничен по частоте: гасит автоматический перебор username.
+	userSearchLimiter := ratelimit.New(20, time.Minute)
+
 	http.HandleFunc("POST /register", handlers.HandleRegister(userStorage, jwtManager))
 	http.HandleFunc("POST /login", handlers.HandleLogin(userStorage, jwtManager))
 	http.Handle("GET /me", authMW(http.HandlerFunc(handlers.HandleMe(userStorage))))
+
+	http.Handle("GET /users/by-username/{username}",
+		authMW(userSearchLimiter.Middleware(
+			http.HandlerFunc(handlers.HandleFindUserByUsername(userStorage)))))
 
 	http.Handle("POST /chats",
 		authMW(http.HandlerFunc(handlers.HandleCreateChat(chatStorage, userStorage))))

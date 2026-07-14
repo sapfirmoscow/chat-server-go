@@ -38,11 +38,33 @@ Authorization: Bearer <JWT_TOKEN>
 | `POST` | `/register` | Регистрация пользователя |
 | `POST` | `/login` | Вход, получение токена |
 | `GET` | `/me` | Профиль текущего пользователя |
+| `GET` | `/users/by-username/{username}` | Поиск пользователя по точному username |
 | `POST` | `/chats` | Создать DM-чат с пользователем |
 | `GET` | `/chats` | Список своих чатов |
 | `POST` | `/chats/{id}/messages` | Отправить сообщение |
 | `GET` | `/chats/{id}/messages` | История сообщений (с пагинацией) |
 | `GET` | `/ws` | WebSocket-соединение |
+
+### Поиск пользователей
+
+```
+GET /users/by-username/{username}
+→ 200 {"id": "...", "username": "..."}
+→ 404 {"error": "user not found"}
+```
+
+Нужен для создания DM-чата: `POST /chats` требует `member_id`, а взять его больше неоткуда.
+
+Особенности реализации (осознанные решения):
+- **Поиск точный, а не по подстроке.** Точное совпадение возвращает максимум одну запись,
+  поэтому выкачать реестр пользователей перебором нельзя. Подстрочный поиск или list-all
+  позволили бы одному авторизованному аккаунту собрать всю базу (username + UUID).
+- **Отдаются только `id` и `username`** — без `created_at`.
+- **Закрыт авторизацией** (`auth.Middleware`), как `/me` и `/chats`.
+- **Ограничение частоты: 20 запросов в минуту на пользователя** (`internal/ratelimit`),
+  сверх лимита — `429` с заголовком `Retry-After`. Гасит автоматический перебор username.
+- Ввод нормализуется (`TrimSpace` + `ToLower`) так же, как при регистрации.
+
 
 ### WebSocket
 
@@ -78,6 +100,7 @@ internal/
   auth/              — JWT-менеджер и middleware
   handlers/          — HTTP-обработчики (auth, user, chat, message, ws)
   models/            — модели данных (User, Chat, Message)
+  ratelimit/         — ограничение частоты запросов (middleware)
   storage/           — in-memory хранилища
   ws/                — WebSocket Hub и Client
 api-spec.yaml        — OpenAPI-спецификация

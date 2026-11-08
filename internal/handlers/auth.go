@@ -34,12 +34,7 @@ func HandleRegister(userStorage storage.Users, jwtManager *auth.Manager) http.Ha
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req RegisterRequest
 
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&req)
-		if err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeJSON(w, r, &req) {
 			return
 		}
 
@@ -106,12 +101,7 @@ func HandleLogin(userStorage storage.Users, jwtManager *auth.Manager) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req LoginRequest
 
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&req)
-		if err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeJSON(w, r, &req) {
 			return
 		}
 

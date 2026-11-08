@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
-	"github.com/sapfirmoscow/chat-server-go/internal/handlers"
-	"github.com/sapfirmoscow/chat-server-go/internal/ratelimit"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
@@ -36,40 +34,17 @@ func main() {
 	}()
 	log.Printf("storage: %s", storageDesc)
 
-	userStorage, chatStorage, messages := store.users, store.chats, store.messages
-
 	jwtManager := auth.NewManager(cfg.JWTSecret, time.Hour*24)
-
-	authMW := auth.Middleware(jwtManager)
-
 	hub := ws.NewHub()
 
-	// Поиск пользователей ограничен по частоте: гасит автоматический перебор username.
-	userSearchLimiter := ratelimit.New(20, time.Minute)
-
-	http.HandleFunc("POST /register", handlers.HandleRegister(userStorage, jwtManager))
-	http.HandleFunc("POST /login", handlers.HandleLogin(userStorage, jwtManager))
-	http.Handle("GET /me", authMW(http.HandlerFunc(handlers.HandleMe(userStorage))))
-
-	http.Handle("GET /users/by-username/{username}",
-		authMW(userSearchLimiter.Middleware(
-			http.HandlerFunc(handlers.HandleFindUserByUsername(userStorage)))))
-
-	http.Handle("POST /chats",
-		authMW(http.HandlerFunc(handlers.HandleCreateChat(chatStorage, userStorage))))
-
-	http.Handle("GET /chats",
-		authMW(http.HandlerFunc(handlers.HandleGetMyChats(chatStorage, userStorage))))
-
-	http.Handle("POST /chats/{id}/messages",
-		authMW(http.HandlerFunc(handlers.HandleSendMessage(chatStorage, messages, hub))))
-
-	http.Handle("GET /chats/{id}/messages",
-		authMW(http.HandlerFunc(handlers.HandleGetMessages(chatStorage, messages))))
-
-	http.Handle("GET /ws", handlers.HandleWS(jwtManager, hub))
-
-	srv := &http.Server{Addr: cfg.Addr}
+	router := newRouter(deps{
+		users:    store.users,
+		chats:    store.chats,
+		messages: store.messages,
+		jwt:      jwtManager,
+		hub:      hub,
+	})
+	srv := newHTTPServer(cfg.Addr, router, defaultTimeouts)
 
 	go func() {
 		<-ctx.Done()

@@ -22,13 +22,13 @@ type stores struct {
 
 // openStorage выбирает хранилище по переменным окружения:
 //
-//	STORAGE_DRIVER — memory | sqlite | postgres (по умолчанию sqlite)
+//	STORAGE_DRIVER — memory | sqlite | postgres (по умолчанию memory)
 //	DATABASE_URL   — для sqlite путь к файлу (по умолчанию chat.db),
 //	                 для postgres обязательный URL подключения
 func openStorage(ctx context.Context) (*stores, string, error) {
 	driver := os.Getenv("STORAGE_DRIVER")
 	if driver == "" {
-		driver = string(sqlstore.SQLite)
+		driver = "memory"
 	}
 	dsn := os.Getenv("DATABASE_URL")
 

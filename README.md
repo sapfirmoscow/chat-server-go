@@ -17,7 +17,7 @@
 git clone https://github.com/sapfirmoscow/chat-server-go
 cd chat-server-go
 go run ./cmd/server
-# Сервер запустится на http://localhost:8080, данные — в файле chat.db (SQLite)
+# Сервер запустится на http://localhost:8080, данные хранятся в памяти до перезапуска
 ```
 
 ### Хранилище
@@ -26,7 +26,7 @@ go run ./cmd/server
 
 | Переменная | Значения | По умолчанию |
 |---|---|---|
-| `STORAGE_DRIVER` | `sqlite`, `postgres`, `memory` | `sqlite` |
+| `STORAGE_DRIVER` | `memory`, `sqlite`, `postgres` | `memory` |
 | `DATABASE_URL` | путь к файлу SQLite или URL PostgreSQL | `chat.db` для SQLite, для PostgreSQL обязателен |
 
 PostgreSQL локально через Docker:
@@ -42,7 +42,8 @@ go run ./cmd/server
 и применяются при каждом запуске (уже применённые пропускаются). Новая миграция — пара файлов
 `00000N_name.up.sql` / `00000N_name.down.sql` для каждого диалекта.
 
-`memory` хранит данные только до перезапуска, это удобно для быстрых экспериментов.
+`memory` (по умолчанию) хранит данные только до перезапуска, это удобно для быстрых экспериментов.
+Чтобы данные сохранялись в файле без установки чего-либо, задайте `STORAGE_DRIVER=sqlite`.
 
 ### Тесты
 

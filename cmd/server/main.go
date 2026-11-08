@@ -1,22 +1,37 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/handlers"
 	"github.com/sapfirmoscow/chat-server-go/internal/ratelimit"
-	"github.com/sapfirmoscow/chat-server-go/internal/storage/memory"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
 func main() {
-	userStorage := memory.NewUsers()
-	chatStorage := memory.NewChats()
-	messages := memory.NewMessages()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store, storageDesc, err := openStorage(ctx)
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+	defer func() {
+		if err := store.close(); err != nil {
+			log.Printf("storage close: %v", err)
+		}
+	}()
+	log.Printf("storage: %s", storageDesc)
+
+	userStorage, chatStorage, messages := store.users, store.chats, store.messages
 
 	jwtManager := auth.NewManager("i will change it for prom", time.Hour*24)
 
@@ -49,9 +64,23 @@ func main() {
 
 	http.Handle("GET /ws", handlers.HandleWS(jwtManager, hub))
 
-	fmt.Println("Server started on http://localhost:8080")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		log.Fatal(err)
+	srv := &http.Server{Addr: ":8080"}
+
+	go func() {
+		<-ctx.Done()
+		// Перестаём принимать соединения и ждём текущие HTTP-запросы.
+		// WebSocket-соединения Shutdown не ждёт: они закроются с процессом.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}()
+
+	log.Println("Server started on http://localhost:8080")
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("server: %v", err)
+		return // defer закроет хранилище
 	}
+	log.Println("Server stopped")
 }

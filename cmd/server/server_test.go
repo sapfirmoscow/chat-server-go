@@ -11,32 +11,50 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
+	"github.com/sapfirmoscow/chat-server-go/internal/models"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage/memory"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
 type testServer struct {
 	*httptest.Server
-	hub *ws.Hub
+	deps
 }
 
 func newTestServer(t *testing.T, timeouts serverTimeouts) *testServer {
 	t.Helper()
-	hub := ws.NewHub()
-	router := newRouter(deps{
+	d := deps{
 		users:    memory.NewUsers(),
 		chats:    memory.NewChats(),
 		messages: memory.NewMessages(),
 		jwt:      auth.NewManager(testSecret, time.Hour),
-		hub:      hub,
-	})
+		hub:      ws.NewHub(),
+	}
+	router := newRouter(d)
 
 	srv := httptest.NewUnstartedServer(router)
 	srv.Config = newHTTPServer("", router, timeouts)
 	srv.Start()
 	t.Cleanup(srv.Close)
-	return &testServer{Server: srv, hub: hub}
+	return &testServer{Server: srv, deps: d}
+}
+
+// seedUser создаёт пользователя прямо в хранилище и выпускает ему токен.
+// В обход /register: bcrypt под -race медленный и не укладывается в короткие
+// серверные таймауты, которые выставляют некоторые тесты.
+func (s *testServer) seedUser(t *testing.T, username string) (*models.User, string) {
+	t.Helper()
+	u := &models.User{ID: uuid.NewString(), Username: username, PasswordHash: "-", CreatedAt: time.Now().UTC()}
+	if err := s.users.Add(context.Background(), u); err != nil {
+		t.Fatalf("seed user %s: %v", username, err)
+	}
+	token, err := s.jwt.Generate(u.ID)
+	if err != nil {
+		t.Fatalf("token for %s: %v", username, err)
+	}
+	return u, token
 }
 
 // do отправляет JSON-запрос и декодирует ответ в out (если out != nil).
@@ -118,32 +136,27 @@ func TestInvalidJSONStillBadRequest(t *testing.T) {
 // ставят дедлайны на TCP-соединение; net/http сбрасывает их при hijack,
 // и тест страхует от регрессии (например, при смене библиотеки WebSocket).
 func TestWebSocketOutlivesServerTimeouts(t *testing.T) {
-	const short = 200 * time.Millisecond
+	const short = 500 * time.Millisecond
 	s := newTestServer(t, serverTimeouts{ReadHeader: short, Read: short, Write: short, Idle: short})
 
-	alice, bob := s.register(t, "alice"), s.register(t, "bob")
-
-	var chat struct {
-		ID string `json:"id"`
-	}
-	if status := s.do(t, http.MethodPost, "/chats", alice.Token, map[string]string{"member_id": bob.User.ID}, &chat); status != http.StatusCreated {
-		t.Fatalf("create chat: status %d", status)
+	// Подготовка мимо HTTP: под короткими таймаутами идут только быстрые запросы.
+	alice, aliceToken := s.seedUser(t, "alice")
+	bob, bobToken := s.seedUser(t, "bob")
+	chat, _, err := s.chats.GetOrCreateDirect(context.Background(), &models.Chat{
+		ID: uuid.NewString(), MemberIDs: []string{alice.ID, bob.ID}, CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("create chat: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(s.URL, "http")+"/ws", &websocket.DialOptions{
-		Subprotocols: []string{"access_token", bob.Token},
-	})
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.CloseNow()
+	conn := s.dialWS(t, ctx, bobToken)
 
 	time.Sleep(3 * short) // дольше любого из серверных таймаутов
 
-	if status := s.do(t, http.MethodPost, "/chats/"+chat.ID+"/messages", alice.Token, map[string]string{"text": "hi"}, nil); status != http.StatusCreated {
+	if status := s.do(t, http.MethodPost, "/chats/"+chat.ID+"/messages", aliceToken, map[string]string{"text": "hi"}, nil); status != http.StatusCreated {
 		t.Fatalf("send message: status %d", status)
 	}
 

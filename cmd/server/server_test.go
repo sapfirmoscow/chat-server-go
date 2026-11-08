@@ -167,3 +167,69 @@ func TestWebSocketOutlivesServerTimeouts(t *testing.T) {
 		t.Fatalf("unexpected event: %s", data)
 	}
 }
+
+func (s *testServer) dialWS(t *testing.T, ctx context.Context, token string) *websocket.Conn {
+	t.Helper()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(s.URL, "http")+"/ws", &websocket.DialOptions{
+		Subprotocols: []string{"access_token", token},
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	return conn
+}
+
+// При остановке сервера клиенты получают close-фрейм 1001 (going away),
+// а новые подключения сразу закрываются тем же кодом.
+func TestHubShutdownClosesWebSockets(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+	alice := s.register(t, "alice")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn := s.dialWS(t, ctx, alice.Token)
+
+	// Read обязателен: он обрабатывает входящий close-фрейм и отвечает на него.
+	readErr := make(chan error, 1)
+	go func() {
+		_, _, err := conn.Read(ctx)
+		readErr <- err
+	}()
+
+	// Dial возвращается раньше, чем сервер зарегистрирует клиента в хабе.
+	for s.hub.Connections() == 0 {
+		if ctx.Err() != nil {
+			t.Fatal("client was not registered in hub")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		s.hub.Shutdown(ctx)
+		close(shutdownDone)
+	}()
+
+	select {
+	case err := <-readErr:
+		if status := websocket.CloseStatus(err); status != websocket.StatusGoingAway {
+			t.Fatalf("close status = %v (err %v), want StatusGoingAway", status, err)
+		}
+	case <-ctx.Done():
+		t.Fatal("connection was not closed on shutdown")
+	}
+
+	select {
+	case <-shutdownDone:
+	case <-ctx.Done():
+		t.Fatal("hub.Shutdown did not return")
+	}
+
+	late := s.dialWS(t, ctx, alice.Token)
+	_, _, err := late.Read(ctx)
+	if status := websocket.CloseStatus(err); status != websocket.StatusGoingAway {
+		t.Fatalf("connection after shutdown: close status = %v (err %v), want StatusGoingAway", status, err)
+	}
+}

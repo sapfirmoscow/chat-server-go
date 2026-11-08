@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,6 +11,9 @@ import (
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
+
+// shutdownTimeout — сколько ждём текущие запросы и закрытие WebSocket при остановке.
+const shutdownTimeout = 10 * time.Second
 
 func main() {
 	cfg, err := loadConfig(os.Getenv)
@@ -46,21 +47,30 @@ func main() {
 	})
 	srv := newHTTPServer(cfg.Addr, router, defaultTimeouts)
 
+	serveErr := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		// Перестаём принимать соединения и ждём текущие HTTP-запросы.
-		// WebSocket-соединения Shutdown не ждёт: они закроются с процессом.
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown: %v", err)
-		}
+		log.Printf("Server started on %s", cfg.Addr)
+		serveErr <- srv.ListenAndServe()
 	}()
 
-	log.Printf("Server started on %s", cfg.Addr)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	select {
+	case err := <-serveErr:
+		// Сервер не поднялся (например, порт занят) — дальше ждать нечего.
 		log.Printf("server: %v", err)
 		return // defer закроет хранилище
+	case <-ctx.Done():
 	}
+
+	log.Println("Shutting down...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	// Сначала перестаём принимать соединения и дожидаемся текущих HTTP-запросов,
+	// затем закрываем WebSocket-соединения (Shutdown их не отслеживает).
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
+	hub.Shutdown(shutdownCtx)
+
 	log.Println("Server stopped")
 }

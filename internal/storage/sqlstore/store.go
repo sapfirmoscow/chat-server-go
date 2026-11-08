@@ -51,7 +51,7 @@ type Store struct {
 //
 // dsn для PostgreSQL — URL вида postgres://user:pass@host:5432/db?sslmode=disable,
 // для SQLite — путь к файлу (например, chat.db). Для SQLite к dsn автоматически
-// добавляются pragma: foreign_keys, busy_timeout и journal_mode=WAL.
+// добавляются pragma (foreign_keys, busy_timeout, journal_mode=WAL) и _time_format=sqlite.
 func Open(ctx context.Context, dialect Dialect, dsn string) (*Store, error) {
 	driver, err := dialect.driverName()
 	if err != nil {
@@ -108,7 +108,9 @@ func sqliteDSN(dsn string) string {
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	return dsn + sep + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	// _time_format=sqlite: время хранится как "2006-01-02 15:04:05.999999999-07:00",
+	// формат, понятный встроенным функциям дат SQLite.
+	return dsn + sep + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite"
 }
 
 type base struct {

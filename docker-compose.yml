@@ -1,6 +1,9 @@
-# Локальный PostgreSQL для разработки:
+# Только PostgreSQL (для go run на хосте):
 #   docker compose up -d
 #   STORAGE_DRIVER=postgres DATABASE_URL=postgres://chat:chat@localhost:5432/chat?sslmode=disable go run ./cmd/server
+#
+# PostgreSQL + сервер в контейнере (JWT_SECRET берётся из окружения или файла .env):
+#   docker compose --profile app up -d --build
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,6 +20,21 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  server:
+    build: .
+    profiles: [app] # не стартует от простого `docker compose up`
+    environment:
+      STORAGE_DRIVER: postgres
+      DATABASE_URL: postgres://chat:chat@postgres:5432/chat?sslmode=disable
+      # Пустое значение не даст серверу стартовать — он сообщит, как сгенерировать секрет.
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

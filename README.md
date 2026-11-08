@@ -60,6 +60,29 @@ go run ./cmd/server
 `memory` (по умолчанию) хранит данные только до перезапуска, это удобно для быстрых экспериментов.
 Чтобы данные сохранялись в файле без установки чего-либо, задайте `STORAGE_DRIVER=sqlite`.
 
+### Docker
+
+Сервер вместе с PostgreSQL:
+
+```bash
+echo "JWT_SECRET=$(openssl rand -hex 32)" > .env   # .env в .gitignore
+docker compose --profile app up -d --build
+# Сервер: http://localhost:8080
+```
+
+Без `--profile app` поднимается только PostgreSQL, это удобно для `go run` на хосте.
+
+Только образ (in-memory или SQLite в volume):
+
+```bash
+docker build -t chat-server .
+docker run -p 8080:8080 -e JWT_SECRET=... chat-server
+docker run -p 8080:8080 -e JWT_SECRET=...   -e STORAGE_DRIVER=sqlite -e DATABASE_URL=/data/chat.db -v chat-data:/data chat-server
+```
+
+Образ собран на distroless: внутри только статический бинарник, процесс работает не от root.
+По `docker stop` (SIGTERM) сервер дожидается текущих запросов и закрывает WebSocket-соединения.
+
 ### Тесты
 
 ```bash
@@ -158,4 +181,6 @@ internal/
     storagetest/     — общий набор тестов для всех реализаций
   ws/                — WebSocket Hub и Client
 api-spec.yaml        — OpenAPI-спецификация
+Dockerfile           — образ сервера (distroless)
+docker-compose.yml   — PostgreSQL и сервер (профиль app)
 ```

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -13,13 +15,18 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-func BuildChatResponse(chat *models.Chat, userStorage *storage.Users) ChatResponse {
+func BuildChatResponse(ctx context.Context, chat *models.Chat, userStorage storage.Users) ChatResponse {
 	members := make([]models.PublicUser, 0, len(chat.MemberIDs))
 
 	for _, id := range chat.MemberIDs {
-		if user, ok := userStorage.GetByID(id); ok {
-			members = append(members, user.ToPublic())
+		user, err := userStorage.GetByID(ctx, id)
+		if err != nil {
+			if !errors.Is(err, storage.ErrNotFound) {
+				log.Printf("get chat member error: %v", err)
+			}
+			continue
 		}
+		members = append(members, user.ToPublic())
 	}
 
 	return ChatResponse{

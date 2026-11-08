@@ -8,7 +8,8 @@
 - **JWT** — `golang-jwt/jwt/v5`
 - **WebSocket** — `coder/websocket`
 - **UUID** — `google/uuid`
-- **Хранилище** — in-memory (синхронизация через `sync.RWMutex`)
+- **Хранилище** — PostgreSQL (`jackc/pgx/v5`), SQLite (`modernc.org/sqlite`, без CGO) или in-memory
+- **Миграции** — `golang-migrate/migrate/v4`, применяются автоматически при старте
 
 ## Быстрый старт
 
@@ -16,7 +17,40 @@
 git clone https://github.com/sapfirmoscow/chat-server-go
 cd chat-server-go
 go run ./cmd/server
-# Сервер запустится на http://localhost:8080
+# Сервер запустится на http://localhost:8080, данные хранятся в памяти до перезапуска
+```
+
+### Хранилище
+
+Выбирается переменными окружения:
+
+| Переменная | Значения | По умолчанию |
+|---|---|---|
+| `STORAGE_DRIVER` | `memory`, `sqlite`, `postgres` | `memory` |
+| `DATABASE_URL` | путь к файлу SQLite или URL PostgreSQL | `chat.db` для SQLite, для PostgreSQL обязателен |
+
+PostgreSQL локально через Docker:
+
+```bash
+docker compose up -d
+STORAGE_DRIVER=postgres \
+DATABASE_URL="postgres://chat:chat@localhost:5432/chat?sslmode=disable" \
+go run ./cmd/server
+```
+
+Миграции лежат в `internal/storage/sqlstore/migrations/{postgres,sqlite}`, встраиваются в бинарник
+и применяются при каждом запуске (уже применённые пропускаются). Новая миграция — пара файлов
+`00000N_name.up.sql` / `00000N_name.down.sql` для каждого диалекта.
+
+`memory` (по умолчанию) хранит данные только до перезапуска, это удобно для быстрых экспериментов.
+Чтобы данные сохранялись в файле без установки чего-либо, задайте `STORAGE_DRIVER=sqlite`.
+
+### Тесты
+
+```bash
+go test ./...
+# Тот же набор тестов на PostgreSQL (таблицы в этой БД будут очищены):
+TEST_POSTGRES_URL="postgres://chat:chat@localhost:5432/chat?sslmode=disable" go test ./internal/storage/...
 ```
 
 ## API
@@ -101,12 +135,14 @@ internal/
   handlers/          — HTTP-обработчики (auth, user, chat, message, ws)
   models/            — модели данных (User, Chat, Message)
   ratelimit/         — ограничение частоты запросов (middleware)
-  storage/           — in-memory хранилища
+  storage/           — интерфейсы хранилищ
+    memory/          — in-memory реализация
+    sqlstore/        — PostgreSQL / SQLite + миграции
+    storagetest/     — общий набор тестов для всех реализаций
   ws/                — WebSocket Hub и Client
 api-spec.yaml        — OpenAPI-спецификация
 ```
 
 ## Заметки
 
-- Данные хранятся **в памяти** и сбрасываются при перезапуске сервера. Далее будет в БД
 - JWT-секрет захардкожен — перед деплоем вынести в переменную окружения.

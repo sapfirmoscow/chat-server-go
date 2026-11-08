@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -17,7 +18,7 @@ type FindUserResponse struct {
 	Username string `json:"username"`
 }
 
-func HandleMe(userStorage *storage.Users) http.HandlerFunc {
+func HandleMe(userStorage storage.Users) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		userID, ok := auth.GetUserID(r.Context())
@@ -27,10 +28,13 @@ func HandleMe(userStorage *storage.Users) http.HandlerFunc {
 			return
 		}
 
-		user, ok := userStorage.GetByID(userID)
-
-		if !ok {
+		user, err := userStorage.GetByID(r.Context(), userID)
+		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "User not found")
+			return
+		} else if err != nil {
+			log.Printf("get user error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
@@ -49,7 +53,7 @@ func HandleMe(userStorage *storage.Users) http.HandlerFunc {
 // Поиск намеренно точный, а не по подстроке: точное совпадение возвращает
 // максимум одну запись, поэтому выкачать реестр пользователей перебором нельзя.
 // Эндпоинт должен быть закрыт auth.Middleware и ограничен по частоте запросов.
-func HandleFindUserByUsername(userStorage *storage.Users) http.HandlerFunc {
+func HandleFindUserByUsername(userStorage storage.Users) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Нормализация как при регистрации — там username приводится к нижнему регистру.
 		username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
@@ -59,9 +63,13 @@ func HandleFindUserByUsername(userStorage *storage.Users) http.HandlerFunc {
 			return
 		}
 
-		user, found := userStorage.GetByUsername(username)
-		if !found {
+		user, err := userStorage.GetByUsername(r.Context(), username)
+		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "user not found")
+			return
+		} else if err != nil {
+			log.Printf("find user error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 

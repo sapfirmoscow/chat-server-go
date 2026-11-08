@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -26,7 +27,7 @@ type ChatsResponse struct {
 	Chats []ChatResponse `json:"chats"`
 }
 
-func HandleCreateChat(chatStorage *storage.Chats, userStorage *storage.Users) http.HandlerFunc {
+func HandleCreateChat(chatStorage storage.Chats, userStorage storage.Users) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		currentUserID, ok := auth.GetUserID(r.Context())
 
@@ -58,41 +59,39 @@ func HandleCreateChat(chatStorage *storage.Chats, userStorage *storage.Users) ht
 		}
 
 		//check that member exist
-		_, exist := userStorage.GetByID(req.MemberID)
-		if !exist {
+		_, err = userStorage.GetByID(r.Context(), req.MemberID)
+		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "member not found")
 			return
-		}
-
-		//check exist chat for both
-		if chat, exist := chatStorage.FindDirectChat(req.MemberID, currentUserID); exist {
-			//just return already exists chat
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			response := BuildChatResponse(chat, userStorage)
-
-			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("encode error: %v", err)
-			}
+		} else if err != nil {
+			log.Printf("get member error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
-		//create new
-		newChat := models.Chat{
+		// Поиск существующего чата и создание нового — одна атомарная операция
+		// хранилища, поэтому параллельные запросы не создадут дубликат.
+		newChat := &models.Chat{
 			ID:        uuid.NewString(),
 			MemberIDs: []string{currentUserID, req.MemberID},
 			CreatedAt: time.Now().UTC(),
 		}
 
-		if err := chatStorage.Add(&newChat); err != nil {
-			log.Printf("chat add error: %v", err)
+		chat, created, err := chatStorage.GetOrCreateDirect(r.Context(), newChat)
+		if err != nil {
+			log.Printf("get or create chat error: %v", err)
 			WriteError(w, http.StatusInternalServerError, "failed to create chat")
 			return
 		}
 
+		status := http.StatusOK // чат уже существовал
+		if created {
+			status = http.StatusCreated
+		}
+
+		response := BuildChatResponse(r.Context(), chat, userStorage)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		response := BuildChatResponse(&newChat, userStorage)
+		w.WriteHeader(status)
 
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			log.Printf("encode error: %v", err)
@@ -101,7 +100,7 @@ func HandleCreateChat(chatStorage *storage.Chats, userStorage *storage.Users) ht
 	}
 }
 
-func HandleGetMyChats(chatStorage *storage.Chats, userStorage *storage.Users) http.HandlerFunc {
+func HandleGetMyChats(chatStorage storage.Chats, userStorage storage.Users) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		currentUserID, ok := auth.GetUserID(r.Context())
 
@@ -110,12 +109,17 @@ func HandleGetMyChats(chatStorage *storage.Chats, userStorage *storage.Users) ht
 			return
 		}
 
-		chats := chatStorage.GetUserChats(currentUserID)
+		chats, err := chatStorage.GetUserChats(r.Context(), currentUserID)
+		if err != nil {
+			log.Printf("get user chats error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
 
 		responses := make([]ChatResponse, 0, len(chats))
 
 		for _, chat := range chats {
-			responses = append(responses, BuildChatResponse(chat, userStorage))
+			responses = append(responses, BuildChatResponse(r.Context(), chat, userStorage))
 		}
 
 		chatResponse := ChatsResponse{

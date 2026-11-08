@@ -41,3 +41,6 @@ bin/
 # SQLite
 *.db
 *.sqlite
+*.db-wal
+*.db-shm
+*.db-journal

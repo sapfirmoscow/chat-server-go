@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -23,7 +24,7 @@ type MessagesResponse struct {
 	Messages []models.PublicMessage `json:"messages"`
 }
 
-func HandleSendMessage(chats *storage.Chats, messages *storage.Messages, hub *wsPkg.Hub) http.HandlerFunc {
+func HandleSendMessage(chats storage.Chats, messages storage.Messages, hub *wsPkg.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		chat, senderID, ok := resolveChatAccess(w, r, chats)
 		if !ok {
@@ -59,7 +60,11 @@ func HandleSendMessage(chats *storage.Chats, messages *storage.Messages, hub *ws
 			CreatedAt: time.Now().UTC(),
 		}
 
-		messages.Add(&message)
+		if err := messages.Add(r.Context(), &message); err != nil {
+			log.Printf("add message error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "failed to save message")
+			return
+		}
 
 		// рассылка через WebSocket участникам чата
 		payload, err := wsPkg.Marshal(wsPkg.EventMessageNew, message.ToPublic())
@@ -80,7 +85,7 @@ func HandleSendMessage(chats *storage.Chats, messages *storage.Messages, hub *ws
 	}
 }
 
-func HandleGetMessages(chats *storage.Chats, messages *storage.Messages) http.HandlerFunc {
+func HandleGetMessages(chats storage.Chats, messages storage.Messages) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		chat, _, ok := resolveChatAccess(w, r, chats)
 		if !ok {
@@ -100,7 +105,12 @@ func HandleGetMessages(chats *storage.Chats, messages *storage.Messages) http.Ha
 			limit = n
 		}
 
-		msgs := messages.GetByChat(chat.ID, limit)
+		msgs, err := messages.GetByChat(r.Context(), chat.ID, limit)
+		if err != nil {
+			log.Printf("get messages error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
 		publicMessages := make([]models.PublicMessage, 0, len(msgs))
 
 		for _, msg := range msgs {
@@ -123,7 +133,7 @@ func HandleGetMessages(chats *storage.Chats, messages *storage.Messages) http.Ha
 func resolveChatAccess(
 	w http.ResponseWriter,
 	r *http.Request,
-	chats *storage.Chats,
+	chats storage.Chats,
 ) (*models.Chat, string, bool) {
 	userID, ok := auth.GetUserID(r.Context())
 
@@ -139,9 +149,13 @@ func resolveChatAccess(
 		return nil, "", false
 	}
 
-	chat, ok := chats.GetByID(chatID)
-	if !ok {
+	chat, err := chats.GetByID(r.Context(), chatID)
+	if errors.Is(err, storage.ErrNotFound) {
 		WriteError(w, http.StatusNotFound, "chat not found")
+		return nil, "", false
+	} else if err != nil {
+		log.Printf("get chat error: %v", err)
+		WriteError(w, http.StatusInternalServerError, "internal server error")
 		return nil, "", false
 	}
 	if !chat.HasMember(userID) {

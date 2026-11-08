@@ -9,14 +9,14 @@ import (
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/handlers"
 	"github.com/sapfirmoscow/chat-server-go/internal/ratelimit"
-	"github.com/sapfirmoscow/chat-server-go/internal/storage"
+	"github.com/sapfirmoscow/chat-server-go/internal/storage/memory"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
 func main() {
-	userStorage := storage.NewUsers()
-	chatStorage := storage.NewChats()
-	messages := storage.NewMessages()
+	userStorage := memory.NewUsers()
+	chatStorage := memory.NewChats()
+	messages := memory.NewMessages()
 
 	jwtManager := auth.NewManager("i will change it for prom", time.Hour*24)
 

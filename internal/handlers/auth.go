@@ -30,7 +30,7 @@ type AuthResponse struct {
 	User  models.PublicUser `json:"user"`
 }
 
-func HandleRegister(userStorage *storage.Users, jwtManager *auth.Manager) http.HandlerFunc {
+func HandleRegister(userStorage storage.Users, jwtManager *auth.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req RegisterRequest
 
@@ -67,13 +67,14 @@ func HandleRegister(userStorage *storage.Users, jwtManager *auth.Manager) http.H
 			CreatedAt:    time.Now().UTC(),
 		}
 
-		err = userStorage.Add(&newUser)
+		err = userStorage.Add(r.Context(), &newUser)
 
 		if errors.Is(err, storage.ErrUsernameTaken) {
 			WriteError(w, http.StatusConflict, "username already taken")
 
 			return
 		} else if err != nil {
+			log.Printf("add user error: %v", err)
 			WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -101,7 +102,7 @@ func HandleRegister(userStorage *storage.Users, jwtManager *auth.Manager) http.H
 	}
 }
 
-func HandleLogin(userStorage *storage.Users, jwtManager *auth.Manager) http.HandlerFunc {
+func HandleLogin(userStorage storage.Users, jwtManager *auth.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req LoginRequest
 
@@ -116,9 +117,13 @@ func HandleLogin(userStorage *storage.Users, jwtManager *auth.Manager) http.Hand
 
 		req.Username = strings.TrimSpace(strings.ToLower(req.Username))
 
-		user, found := userStorage.GetByUsername(req.Username)
-		if !found {
+		user, err := userStorage.GetByUsername(r.Context(), req.Username)
+		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		} else if err != nil {
+			log.Printf("get user error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 

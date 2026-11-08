@@ -2,7 +2,7 @@ package ws
 
 import "encoding/json"
 
-//mb (typing, read in future)
+// mb (typing, read in future)
 type EventType string
 
 const (

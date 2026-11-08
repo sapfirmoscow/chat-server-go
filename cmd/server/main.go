@@ -17,10 +17,15 @@ import (
 )
 
 func main() {
+	cfg, err := loadConfig(os.Getenv)
+	if err != nil {
+		log.Fatalf("config:\n%v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, storageDesc, err := openStorage(ctx)
+	store, storageDesc, err := openStorage(ctx, cfg.StorageDriver, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
@@ -33,7 +38,7 @@ func main() {
 
 	userStorage, chatStorage, messages := store.users, store.chats, store.messages
 
-	jwtManager := auth.NewManager("i will change it for prom", time.Hour*24)
+	jwtManager := auth.NewManager(cfg.JWTSecret, time.Hour*24)
 
 	authMW := auth.Middleware(jwtManager)
 
@@ -64,7 +69,7 @@ func main() {
 
 	http.Handle("GET /ws", handlers.HandleWS(jwtManager, hub))
 
-	srv := &http.Server{Addr: ":8080"}
+	srv := &http.Server{Addr: cfg.Addr}
 
 	go func() {
 		<-ctx.Done()
@@ -77,7 +82,7 @@ func main() {
 		}
 	}()
 
-	log.Println("Server started on http://localhost:8080")
+	log.Printf("Server started on %s", cfg.Addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("server: %v", err)
 		return // defer закроет хранилище

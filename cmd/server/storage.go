@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/sapfirmoscow/chat-server-go/internal/storage"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage/memory"
@@ -20,18 +19,12 @@ type stores struct {
 	close    func() error
 }
 
-// openStorage выбирает хранилище по переменным окружения:
+// openStorage открывает хранилище:
 //
-//	STORAGE_DRIVER — memory | sqlite | postgres (по умолчанию memory)
-//	DATABASE_URL   — для sqlite путь к файлу (по умолчанию chat.db),
-//	                 для postgres обязательный URL подключения
-func openStorage(ctx context.Context) (*stores, string, error) {
-	driver := os.Getenv("STORAGE_DRIVER")
-	if driver == "" {
-		driver = "memory"
-	}
-	dsn := os.Getenv("DATABASE_URL")
-
+//	driver — memory | sqlite | postgres
+//	dsn    — для sqlite путь к файлу (по умолчанию chat.db),
+//	         для postgres обязательный URL подключения
+func openStorage(ctx context.Context, driver, dsn string) (*stores, string, error) {
 	switch driver {
 	case "memory":
 		return &stores{

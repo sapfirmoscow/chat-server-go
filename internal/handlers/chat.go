@@ -37,12 +37,7 @@ func HandleCreateChat(chatStorage storage.Chats, userStorage storage.Users) http
 		}
 		var req CreateChatRequest
 
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&req)
-		if err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeJSON(w, r, &req) {
 			return
 		}
 
@@ -59,7 +54,7 @@ func HandleCreateChat(chatStorage storage.Chats, userStorage storage.Users) http
 		}
 
 		//check that member exist
-		_, err = userStorage.GetByID(r.Context(), req.MemberID)
+		_, err := userStorage.GetByID(r.Context(), req.MemberID)
 		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "member not found")
 			return

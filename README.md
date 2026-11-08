@@ -16,18 +16,33 @@
 ```bash
 git clone https://github.com/sapfirmoscow/chat-server-go
 cd chat-server-go
+export JWT_SECRET=$(openssl rand -hex 32)
 go run ./cmd/server
 # Сервер запустится на http://localhost:8080, данные хранятся в памяти до перезапуска
 ```
 
-### Хранилище
+PowerShell:
 
-Выбирается переменными окружения:
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+$env:JWT_SECRET = -join ($b | ForEach-Object { $_.ToString('x2') })
+go run ./cmd/server
+```
+
+### Конфигурация
+
+Все настройки — переменные окружения:
 
 | Переменная | Значения | По умолчанию |
 |---|---|---|
+| `JWT_SECRET` | секрет подписи токенов, не короче 32 байт | **обязательна**, без неё сервер не стартует |
+| `PORT` | порт HTTP-сервера | `8080` |
 | `STORAGE_DRIVER` | `memory`, `sqlite`, `postgres` | `memory` |
 | `DATABASE_URL` | путь к файлу SQLite или URL PostgreSQL | `chat.db` для SQLite, для PostgreSQL обязателен |
+
+Если сменить `JWT_SECRET`, все ранее выданные токены станут недействительными.
+
+### Хранилище
 
 PostgreSQL локально через Docker:
 
@@ -44,6 +59,29 @@ go run ./cmd/server
 
 `memory` (по умолчанию) хранит данные только до перезапуска, это удобно для быстрых экспериментов.
 Чтобы данные сохранялись в файле без установки чего-либо, задайте `STORAGE_DRIVER=sqlite`.
+
+### Docker
+
+Сервер вместе с PostgreSQL:
+
+```bash
+echo "JWT_SECRET=$(openssl rand -hex 32)" > .env   # .env в .gitignore
+docker compose --profile app up -d --build
+# Сервер: http://localhost:8080
+```
+
+Без `--profile app` поднимается только PostgreSQL, это удобно для `go run` на хосте.
+
+Только образ (in-memory или SQLite в volume):
+
+```bash
+docker build -t chat-server .
+docker run -p 8080:8080 -e JWT_SECRET=... chat-server
+docker run -p 8080:8080 -e JWT_SECRET=...   -e STORAGE_DRIVER=sqlite -e DATABASE_URL=/data/chat.db -v chat-data:/data chat-server
+```
+
+Образ собран на distroless: внутри только статический бинарник, процесс работает не от root.
+По `docker stop` (SIGTERM) сервер дожидается текущих запросов и закрывает WebSocket-соединения.
 
 ### Тесты
 
@@ -126,6 +164,8 @@ Sec-WebSocket-Protocol: access_token, <JWT_TOKEN>
 
 Один пользователь может иметь несколько одновременных соединений (телефон + десктоп).
 
+При остановке сервера соединения закрываются с кодом `1001` (going away): клиенту нужно переподключиться.
+
 ## Структура проекта
 
 ```
@@ -141,8 +181,6 @@ internal/
     storagetest/     — общий набор тестов для всех реализаций
   ws/                — WebSocket Hub и Client
 api-spec.yaml        — OpenAPI-спецификация
+Dockerfile           — образ сервера (distroless)
+docker-compose.yml   — PostgreSQL и сервер (профиль app)
 ```
-
-## Заметки
-
-- JWT-секрет захардкожен — перед деплоем вынести в переменную окружения.

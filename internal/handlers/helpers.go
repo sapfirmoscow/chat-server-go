@@ -43,3 +43,22 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 		log.Printf("encode error: %v", err)
 	}
 }
+
+// DecodeJSON читает JSON-тело запроса в dst, запрещая неизвестные поля.
+// При ошибке сам пишет ответ (413 для слишком большого тела, иначе 400)
+// и возвращает false.
+func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			WriteError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return false
+		}
+		WriteError(w, http.StatusBadRequest, "invalid json")
+		return false
+	}
+	return true
+}

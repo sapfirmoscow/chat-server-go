@@ -66,3 +66,48 @@ jobs:
         env:
           TEST_POSTGRES_URL: postgres://chat:chat@localhost:5432/chat?sslmode=disable
         run: go test -race -count=1 ./...
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate docker-compose.yml
+        run: |
+          docker compose config -q
+          JWT_SECRET=x docker compose --profile app config -q
+
+      - name: Build image
+        run: docker build -t chat-server:ci .
+
+      - name: Refuses to start without JWT_SECRET
+        run: |
+          if docker run --rm chat-server:ci > out.log 2>&1; then
+            echo "server started without JWT_SECRET"; cat out.log; exit 1
+          fi
+          grep -q "JWT_SECRET is required" out.log
+
+      - name: Smoke test and graceful shutdown
+        run: |
+          docker run -d --name chat -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" chat-server:ci
+          trap 'docker logs chat' EXIT
+
+          # Ждём, пока сервер начнёт отвечать (401 на /me без токена).
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/me || true)
+            [ "$code" = "401" ] && break
+            sleep 1
+          done
+          [ "$code" = "401" ] || { echo "server did not become ready"; exit 1; }
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8080/register \
+            -d '{"username":"alice","password":"secret1"}')
+          [ "$code" = "201" ] || { echo "register returned $code"; exit 1; }
+
+          # docker stop шлёт SIGTERM: сервер должен остановиться сам и с кодом 0.
+          docker stop chat
+          docker logs chat 2>&1 | grep -q "Server stopped"
+          [ "$(docker inspect -f '{{.State.ExitCode}}' chat)" = "0" ]

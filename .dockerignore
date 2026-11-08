@@ -1,0 +1,23 @@
+# Всё, что не нужно для сборки образа
+.git
+.github
+.idea
+.vscode
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Локальные данные и секреты
+.env
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+
+# Артефакты сборки
+bin/
+*.exe
+*.test
+*.out

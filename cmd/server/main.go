@@ -2,25 +2,29 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
-	"github.com/sapfirmoscow/chat-server-go/internal/handlers"
-	"github.com/sapfirmoscow/chat-server-go/internal/ratelimit"
 	"github.com/sapfirmoscow/chat-server-go/internal/ws"
 )
 
+// shutdownTimeout — сколько ждём текущие запросы и закрытие WebSocket при остановке.
+const shutdownTimeout = 10 * time.Second
+
 func main() {
+	cfg, err := loadConfig(os.Getenv)
+	if err != nil {
+		log.Fatalf("config:\n%v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, storageDesc, err := openStorage(ctx)
+	store, storageDesc, err := openStorage(ctx, cfg.StorageDriver, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
@@ -31,56 +35,42 @@ func main() {
 	}()
 	log.Printf("storage: %s", storageDesc)
 
-	userStorage, chatStorage, messages := store.users, store.chats, store.messages
-
-	jwtManager := auth.NewManager("i will change it for prom", time.Hour*24)
-
-	authMW := auth.Middleware(jwtManager)
-
+	jwtManager := auth.NewManager(cfg.JWTSecret, time.Hour*24)
 	hub := ws.NewHub()
 
-	// Поиск пользователей ограничен по частоте: гасит автоматический перебор username.
-	userSearchLimiter := ratelimit.New(20, time.Minute)
+	router := newRouter(deps{
+		users:    store.users,
+		chats:    store.chats,
+		messages: store.messages,
+		jwt:      jwtManager,
+		hub:      hub,
+	})
+	srv := newHTTPServer(cfg.Addr, router, defaultTimeouts)
 
-	http.HandleFunc("POST /register", handlers.HandleRegister(userStorage, jwtManager))
-	http.HandleFunc("POST /login", handlers.HandleLogin(userStorage, jwtManager))
-	http.Handle("GET /me", authMW(http.HandlerFunc(handlers.HandleMe(userStorage))))
-
-	http.Handle("GET /users/by-username/{username}",
-		authMW(userSearchLimiter.Middleware(
-			http.HandlerFunc(handlers.HandleFindUserByUsername(userStorage)))))
-
-	http.Handle("POST /chats",
-		authMW(http.HandlerFunc(handlers.HandleCreateChat(chatStorage, userStorage))))
-
-	http.Handle("GET /chats",
-		authMW(http.HandlerFunc(handlers.HandleGetMyChats(chatStorage, userStorage))))
-
-	http.Handle("POST /chats/{id}/messages",
-		authMW(http.HandlerFunc(handlers.HandleSendMessage(chatStorage, messages, hub))))
-
-	http.Handle("GET /chats/{id}/messages",
-		authMW(http.HandlerFunc(handlers.HandleGetMessages(chatStorage, messages))))
-
-	http.Handle("GET /ws", handlers.HandleWS(jwtManager, hub))
-
-	srv := &http.Server{Addr: ":8080"}
-
+	serveErr := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		// Перестаём принимать соединения и ждём текущие HTTP-запросы.
-		// WebSocket-соединения Shutdown не ждёт: они закроются с процессом.
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown: %v", err)
-		}
+		log.Printf("Server started on %s", cfg.Addr)
+		serveErr <- srv.ListenAndServe()
 	}()
 
-	log.Println("Server started on http://localhost:8080")
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	select {
+	case err := <-serveErr:
+		// Сервер не поднялся (например, порт занят) — дальше ждать нечего.
 		log.Printf("server: %v", err)
 		return // defer закроет хранилище
+	case <-ctx.Done():
 	}
+
+	log.Println("Shutting down...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	// Сначала перестаём принимать соединения и дожидаемся текущих HTTP-запросов,
+	// затем закрываем WebSocket-соединения (Shutdown их не отслеживает).
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
+	hub.Shutdown(shutdownCtx)
+
 	log.Println("Server stopped")
 }

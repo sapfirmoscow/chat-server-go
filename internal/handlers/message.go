@@ -33,12 +33,7 @@ func HandleSendMessage(chats storage.Chats, messages storage.Messages, hub *wsPk
 
 		var req SendMessageRequest
 
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&req)
-		if err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeJSON(w, r, &req) {
 			return
 		}
 

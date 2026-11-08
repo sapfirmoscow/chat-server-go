@@ -1,8 +1,11 @@
 package ws
 
 import (
+	"context"
 	"log"
 	"sync"
+
+	"github.com/coder/websocket"
 )
 
 // Hub держит реестр всех активных клиентов и умеет адресовать им сообщения
@@ -10,6 +13,7 @@ import (
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[string]map[*Client]struct{}
+	closed  bool // после Shutdown новые клиенты не принимаются
 }
 
 func NewHub() *Hub {
@@ -19,10 +23,15 @@ func NewHub() *Hub {
 }
 
 // Register добавляет клиента в реестр. Один user может иметь несколько
-// клиентов (телефон + десктоп).
-func (h *Hub) Register(c *Client) {
+// клиентов (телефон + десктоп). Возвращает false, если хаб уже остановлен:
+// тогда вызывающий должен закрыть соединение сам.
+func (h *Hub) Register(c *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.closed {
+		return false
+	}
 
 	set, ok := h.clients[c.UserID]
 	if !ok {
@@ -31,7 +40,7 @@ func (h *Hub) Register(c *Client) {
 	}
 	set[c] = struct{}{}
 	log.Printf("hub register user=%s total_conns=%d", c.UserID, len(set))
-
+	return true
 }
 
 // Unregister удаляет клиента из реестра и закрывает его канал send.
@@ -84,5 +93,62 @@ func (h *Hub) SendToUser(userID string, msg []byte) {
 
 		h.Unregister(c)
 		_ = c.conn.CloseNow()
+	}
+}
+
+// Connections возвращает число активных соединений по всем пользователям.
+func (h *Hub) Connections() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	n := 0
+	for _, set := range h.clients {
+		n += len(set)
+	}
+	return n
+}
+
+// Shutdown перестаёт принимать новых клиентов и закрывает все активные
+// соединения с кодом 1001 (going away), чтобы клиенты знали, что пора
+// переподключиться. Ждёт завершения close-handshake или отмены ctx.
+func (h *Hub) Shutdown(ctx context.Context) {
+	h.mu.Lock()
+	h.closed = true
+	var all []*Client
+	for _, set := range h.clients {
+		for c := range set {
+			all = append(all, c)
+		}
+	}
+	h.mu.Unlock()
+
+	if len(all) == 0 {
+		return
+	}
+	log.Printf("hub shutdown: closing %d connections", len(all))
+
+	// Close блокируется до ответа клиента (до 5 с), поэтому закрываем параллельно
+	// и вне мьютекса: обработчики соединений сами вызовут Unregister.
+	var wg sync.WaitGroup
+	for _, c := range all {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = c.conn.Close(websocket.StatusGoingAway, "server shutting down")
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		for _, c := range all {
+			_ = c.conn.CloseNow()
+		}
 	}
 }

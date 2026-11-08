@@ -33,7 +33,10 @@ func HandleWS(jwtManager *auth.Manager, hub *wsPkg.Hub) http.HandlerFunc {
 		defer conn.CloseNow()
 
 		client := wsPkg.NewClient(userID, conn)
-		hub.Register(client)
+		if !hub.Register(client) {
+			_ = conn.Close(websocket.StatusGoingAway, "server shutting down")
+			return
+		}
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()

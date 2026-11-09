@@ -246,3 +246,27 @@ func TestHubShutdownClosesWebSockets(t *testing.T) {
 		t.Fatalf("connection after shutdown: close status = %v (err %v), want StatusGoingAway", status, err)
 	}
 }
+
+// Ошибки middleware (auth, rate limit) приходят в том же JSON-формате, что и ошибки обработчиков.
+func TestMiddlewareErrorsAreJSON(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+
+	resp, err := s.Client().Get(s.URL + "/me")
+	if err != nil {
+		t.Fatalf("get /me: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Error == "" {
+		t.Fatalf("body is not {\"error\": ...}: %v %+v", err, body)
+	}
+}

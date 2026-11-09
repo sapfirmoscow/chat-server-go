@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
+	"github.com/sapfirmoscow/chat-server-go/internal/httpjson"
 )
 
 // Limiter — счётчик запросов в фиксированном окне.
@@ -79,7 +80,7 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 
 		if !l.allow(key) {
 			w.Header().Set("Retry-After", strconv.Itoa(int(l.window.Seconds())))
-			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			httpjson.Error(w, http.StatusTooManyRequests, "too many requests")
 			return
 		}
 

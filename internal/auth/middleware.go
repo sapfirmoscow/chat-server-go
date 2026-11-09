@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/sapfirmoscow/chat-server-go/internal/httpjson"
 )
 
 type contextKey string
@@ -15,13 +17,13 @@ func Middleware(jwtManager *Manager) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
+				httpjson.Error(w, http.StatusUnauthorized, "missing authorization header")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+				httpjson.Error(w, http.StatusUnauthorized, "invalid authorization header format")
 				return
 			}
 
@@ -29,7 +31,7 @@ func Middleware(jwtManager *Manager) func(http.Handler) http.Handler {
 
 			userID, err := jwtManager.Verify(tokenStr)
 			if err != nil {
-				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+				httpjson.Error(w, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
 

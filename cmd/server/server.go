@@ -15,6 +15,14 @@ import (
 // сообщение на 2000 байт текста, так что 64 КиБ хватает с большим запасом.
 const maxBodyBytes = 64 << 10
 
+// Лимиты частоты запросов. /login и /register доступны без токена, поэтому
+// ограничиваются по IP: гасят перебор паролей и массовую регистрацию.
+const (
+	loginRateLimit      = 10 // попыток входа в минуту с одного IP
+	registerRateLimit   = 10 // регистраций в минуту с одного IP
+	userSearchRateLimit = 20 // поисков в минуту на пользователя
+)
+
 // serverTimeouts — таймауты http.Server. Защищают от клиентов, которые
 // держат соединение, медленно отправляя заголовки или тело (slowloris).
 type serverTimeouts struct {
@@ -45,11 +53,13 @@ func newRouter(d deps) http.Handler {
 	mux := http.NewServeMux()
 	authMW := auth.Middleware(d.jwt)
 
+	loginLimiter := ratelimit.New(loginRateLimit, time.Minute)
+	registerLimiter := ratelimit.New(registerRateLimit, time.Minute)
 	// Поиск пользователей ограничен по частоте: гасит автоматический перебор username.
-	userSearchLimiter := ratelimit.New(20, time.Minute)
+	userSearchLimiter := ratelimit.New(userSearchRateLimit, time.Minute)
 
-	mux.HandleFunc("POST /register", handlers.HandleRegister(d.users, d.jwt))
-	mux.HandleFunc("POST /login", handlers.HandleLogin(d.users, d.jwt))
+	mux.Handle("POST /register", registerLimiter.Middleware(handlers.HandleRegister(d.users, d.jwt)))
+	mux.Handle("POST /login", loginLimiter.Middleware(handlers.HandleLogin(d.users, d.jwt)))
 	mux.Handle("GET /me", authMW(handlers.HandleMe(d.users)))
 
 	mux.Handle("GET /users/by-username/{username}",

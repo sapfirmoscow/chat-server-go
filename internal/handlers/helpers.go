@@ -7,13 +7,10 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/sapfirmoscow/chat-server-go/internal/httpjson"
 	"github.com/sapfirmoscow/chat-server-go/internal/models"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage"
 )
-
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
 
 func BuildChatResponse(ctx context.Context, chat *models.Chat, userStorage storage.Users) ChatResponse {
 	members := make([]models.PublicUser, 0, len(chat.MemberIDs))
@@ -36,12 +33,9 @@ func BuildChatResponse(ctx context.Context, chat *models.Chat, userStorage stora
 	}
 }
 
+// WriteError отправляет ошибку в едином формате {"error": "..."}.
 func WriteError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: message}); err != nil {
-		log.Printf("encode error: %v", err)
-	}
+	httpjson.Error(w, status, message)
 }
 
 // DecodeJSON читает JSON-тело запроса в dst, запрещая неизвестные поля.

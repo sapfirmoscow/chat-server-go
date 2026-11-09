@@ -246,3 +246,82 @@ func TestHubShutdownClosesWebSockets(t *testing.T) {
 		t.Fatalf("connection after shutdown: close status = %v (err %v), want StatusGoingAway", status, err)
 	}
 }
+
+// Ошибки middleware (auth, rate limit) приходят в том же JSON-формате, что и ошибки обработчиков.
+func TestMiddlewareErrorsAreJSON(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+
+	resp, err := s.Client().Get(s.URL + "/me")
+	if err != nil {
+		t.Fatalf("get /me: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Error == "" {
+		t.Fatalf("body is not {\"error\": ...}: %v %+v", err, body)
+	}
+}
+
+// Пароль длиннее 72 байт bcrypt не принимает: раньше это давало 500.
+func TestRegisterPasswordTooLong(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+
+	var body struct {
+		Error string `json:"error"`
+	}
+	status := s.do(t, http.MethodPost, "/register", "", map[string]string{
+		"username": "alice",
+		"password": strings.Repeat("a", 73),
+	}, &body)
+	if status != http.StatusBadRequest || !strings.Contains(body.Error, "72") {
+		t.Fatalf("got %d %q, want 400 mentioning the 72-byte limit", status, body.Error)
+	}
+}
+
+func TestRegisterUsernameRules(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+
+	for _, username := range []string{"алиса", "аlice", "al ice", "ab"} {
+		status := s.do(t, http.MethodPost, "/register", "", map[string]string{"username": username, "password": "secret1"}, nil)
+		if status != http.StatusBadRequest {
+			t.Errorf("register %q: status %d, want 400", username, status)
+		}
+	}
+
+	// Регистр и пробелы по краям нормализуются, а не отклоняются.
+	var out authResp
+	if status := s.do(t, http.MethodPost, "/register", "", map[string]string{"username": " Alice.S ", "password": "secret1"}, &out); status != http.StatusCreated {
+		t.Fatalf("register normalized username: status %d, want 201", status)
+	}
+	var found struct {
+		Username string `json:"username"`
+	}
+	if status := s.do(t, http.MethodGet, "/users/by-username/ALICE.S", out.Token, nil, &found); status != http.StatusOK || found.Username != "alice.s" {
+		t.Fatalf("search: status %d, username %q; want 200 alice.s", status, found.Username)
+	}
+}
+
+// Перебор паролей упирается в лимит: после loginRateLimit попыток — 429.
+func TestLoginRateLimited(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+	s.register(t, "alice")
+
+	creds := map[string]string{"username": "alice", "password": "wrong-password"}
+	for i := range loginRateLimit {
+		if status := s.do(t, http.MethodPost, "/login", "", creds, nil); status != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status %d, want 401", i+1, status)
+		}
+	}
+	if status := s.do(t, http.MethodPost, "/login", "", creds, nil); status != http.StatusTooManyRequests {
+		t.Fatalf("attempt over the limit: status %d, want 429", status)
+	}
+}

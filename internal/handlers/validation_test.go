@@ -28,3 +28,34 @@ func TestValidatePassword(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateUsername(t *testing.T) {
+	valid := []string{"alice", "bob_42", "a.b", "abc", strings.Repeat("a", 32), "123"}
+	invalid := []string{
+		"ab",                    // короче 3
+		strings.Repeat("a", 33), // длиннее 32
+		"алиса",                 // кириллица
+		"аlice",                 // кириллическая "а" + латиница — подделка ника
+		"al ice",                // пробел
+		"al-ice",                // дефис
+		"alice!",
+		"Alice", // validateUsername ждёт нормализованное значение
+		"",
+	}
+	for _, u := range valid {
+		if msg := validateUsername(u); msg != "" {
+			t.Errorf("validateUsername(%q) = %q, want valid", u, msg)
+		}
+	}
+	for _, u := range invalid {
+		if validateUsername(u) == "" {
+			t.Errorf("validateUsername(%q) accepted, want error", u)
+		}
+	}
+}
+
+func TestNormalizeUsername(t *testing.T) {
+	if got := normalizeUsername("  Alice.Smith "); got != "alice.smith" {
+		t.Fatalf("normalizeUsername = %q, want %q", got, "alice.smith")
+	}
+}

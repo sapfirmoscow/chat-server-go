@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strings"
+	"unicode/utf8"
 
 	"github.com/sapfirmoscow/chat-server-go/internal/auth"
 	"github.com/sapfirmoscow/chat-server-go/internal/storage"
@@ -56,9 +56,11 @@ func HandleMe(userStorage storage.Users) http.HandlerFunc {
 func HandleFindUserByUsername(userStorage storage.Users) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Нормализация как при регистрации — там username приводится к нижнему регистру.
-		username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
+		username := normalizeUsername(r.PathValue("username"))
 
-		if len(username) < 3 || len(username) > 32 {
+		// Здесь только длина, без набора символов: пользователи, зарегистрированные
+		// до введения правил username, должны оставаться находимыми.
+		if n := utf8.RuneCountInString(username); n < minUsernameRunes || n > maxUsernameRunes {
 			WriteError(w, http.StatusBadRequest, "username must be 3-32 characters")
 			return
 		}

@@ -286,3 +286,26 @@ func TestRegisterPasswordTooLong(t *testing.T) {
 		t.Fatalf("got %d %q, want 400 mentioning the 72-byte limit", status, body.Error)
 	}
 }
+
+func TestRegisterUsernameRules(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+
+	for _, username := range []string{"алиса", "аlice", "al ice", "ab"} {
+		status := s.do(t, http.MethodPost, "/register", "", map[string]string{"username": username, "password": "secret1"}, nil)
+		if status != http.StatusBadRequest {
+			t.Errorf("register %q: status %d, want 400", username, status)
+		}
+	}
+
+	// Регистр и пробелы по краям нормализуются, а не отклоняются.
+	var out authResp
+	if status := s.do(t, http.MethodPost, "/register", "", map[string]string{"username": " Alice.S ", "password": "secret1"}, &out); status != http.StatusCreated {
+		t.Fatalf("register normalized username: status %d, want 201", status)
+	}
+	var found struct {
+		Username string `json:"username"`
+	}
+	if status := s.do(t, http.MethodGet, "/users/by-username/ALICE.S", out.Token, nil, &found); status != http.StatusOK || found.Username != "alice.s" {
+		t.Fatalf("search: status %d, username %q; want 200 alice.s", status, found.Username)
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,10 +37,10 @@ func HandleRegister(userStorage storage.Users, jwtManager *auth.Manager) http.Ha
 			return
 		}
 
-		req.Username = strings.TrimSpace(strings.ToLower(req.Username))
+		req.Username = normalizeUsername(req.Username)
 
-		if len(req.Username) < 3 || len(req.Username) > 32 {
-			WriteError(w, http.StatusBadRequest, "username must be 3-32 characters")
+		if msg := validateUsername(req.Username); msg != "" {
+			WriteError(w, http.StatusBadRequest, msg)
 			return
 		}
 		if msg := validatePassword(req.Password); msg != "" {
@@ -105,7 +104,7 @@ func HandleLogin(userStorage storage.Users, jwtManager *auth.Manager) http.Handl
 			return
 		}
 
-		req.Username = strings.TrimSpace(strings.ToLower(req.Username))
+		req.Username = normalizeUsername(req.Username)
 
 		user, err := userStorage.GetByUsername(r.Context(), req.Username)
 		if errors.Is(err, storage.ErrNotFound) {

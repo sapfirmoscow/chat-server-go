@@ -309,3 +309,19 @@ func TestRegisterUsernameRules(t *testing.T) {
 		t.Fatalf("search: status %d, username %q; want 200 alice.s", status, found.Username)
 	}
 }
+
+// Перебор паролей упирается в лимит: после loginRateLimit попыток — 429.
+func TestLoginRateLimited(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+	s.register(t, "alice")
+
+	creds := map[string]string{"username": "alice", "password": "wrong-password"}
+	for i := range loginRateLimit {
+		if status := s.do(t, http.MethodPost, "/login", "", creds, nil); status != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status %d, want 401", i+1, status)
+		}
+	}
+	if status := s.do(t, http.MethodPost, "/login", "", creds, nil); status != http.StatusTooManyRequests {
+		t.Fatalf("attempt over the limit: status %d, want 429", status)
+	}
+}

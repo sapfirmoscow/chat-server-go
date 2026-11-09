@@ -44,8 +44,8 @@ func HandleRegister(userStorage storage.Users, jwtManager *auth.Manager) http.Ha
 			WriteError(w, http.StatusBadRequest, "username must be 3-32 characters")
 			return
 		}
-		if len(req.Password) < 6 {
-			WriteError(w, http.StatusBadRequest, "password must be at least 6 characters")
+		if msg := validatePassword(req.Password); msg != "" {
+			WriteError(w, http.StatusBadRequest, msg)
 			return
 		}
 

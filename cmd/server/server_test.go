@@ -270,3 +270,19 @@ func TestMiddlewareErrorsAreJSON(t *testing.T) {
 		t.Fatalf("body is not {\"error\": ...}: %v %+v", err, body)
 	}
 }
+
+// Пароль длиннее 72 байт bcrypt не принимает: раньше это давало 500.
+func TestRegisterPasswordTooLong(t *testing.T) {
+	s := newTestServer(t, defaultTimeouts)
+
+	var body struct {
+		Error string `json:"error"`
+	}
+	status := s.do(t, http.MethodPost, "/register", "", map[string]string{
+		"username": "alice",
+		"password": strings.Repeat("a", 73),
+	}, &body)
+	if status != http.StatusBadRequest || !strings.Contains(body.Error, "72") {
+		t.Fatalf("got %d %q, want 400 mentioning the 72-byte limit", status, body.Error)
+	}
+}
